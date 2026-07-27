@@ -1,0 +1,4 @@
+﻿raw/
+*.db
+*.db-shm
+*.db-wal
