@@ -1,0 +1,911 @@
+﻿杩欎釜鏄伅甯︾殑鎺у埗浠ｇ爜锛岀幇鍦ㄦ敼涓轰笁鑹茬伅锛岃姹傛帶鍒堕€昏緫涓嶅彉锛屽彧鏄敼鍙?85鍙戦€佺殑鎸囦护锛?include "Tapelight.h"
+#include "usart.h"聽 // 娣诲姞UART澶存枃浠?
+#include "main.h"
+#include "cmsis_os.h"聽 // 娣诲姞RTOS绯荤粺鏃堕棿鏀寔
+#include "HC_433.h"
+
+// 鍦ㄦ枃浠堕《閮ㄦ坊鍔狅紙绾︾8琛岋級
+static uint32_t last_update = 0;聽 // 涓婃鏇存柊鏃堕棿
+
+uint16_t Speed = 0xA0;聽 // 鍒濆浜害涓?xA0;
+
+/**
+聽* @brief 鍛煎彨鐏厤缃?
+聽*
+聽* static const uint8_t green_cmd[] = {0xA5, 0x06, 0xFF, 0xA0, 0x00, 0xFF, 0x00, 0xA4, 0x5A};
+聽* 鏍￠獙鍜岃绠楋細0x06+0xFF+0xA0+0x00+0xFF+0x00 = 缁撴灉鍙栦綆8浣?
+聽*/
+
+// 鍩虹鐏厜鎺у埗鍛戒护锛堟牸寮忥細A5 闀垮害 鐩爣鍦板潃 妯″紡 鍙傛暟1 鍙傛暟2 鍙傛暟3 鏍￠獙鍜?5A锛?
+// 缁胯壊甯镐寒锛欰5 06 FF A0 00 FF 00 A4 5A
+static const uint8_t green_cmd[] = {0xA5, 0x06, 0xFF, 0xA0, 0x00, 0xFF, 0x00, 0xA4, 0x5A};
+// 鐧借壊鐧藉厜锛歛5 08 ff a1 05 04 00 01 01 ee 5a
+// 绾㈣壊甯镐寒锛欰5 06 FF A0 FF 00 00 A4 5A聽
+static const uint8_t red_cmd[] = {0xA5, 0x06, 0xFF, 0xA0, 0xFF, 0x00, 0x00, 0xA4, 0x5A};
+// 钃濊壊甯镐寒锛欰5 06 FF A0 00 00 FF A4 5A聽
+static const uint8_t blue_cmd[] = {0xA5, 0x06, 0xFF, 0xA0, 0x00, 0x00, 0xFF, 0xA4, 0x5A};
+// 榛勮壊甯镐寒锛堢孩+缁匡級锛欰5 06 FF A0 FF FF 00 A3 5A
+static const uint8_t yellow_cmd[] = {0xA5, 0x06, 0xFF, 0xA0, 0xFF, 0xFF, 0x00, 0xA3, 0x5A};
+// 鍏抽棴鐏甫锛欰5 06 FF A0 00 00 00 A5 5A
+static const uint8_t off_cmd[] = {0xA5, 0x06, 0xFF, 0xA0, 0x00, 0x00, 0x00, 0xA5, 0x5A};
+
+
+// 鍛煎惛鏁堟灉鎺у埗鍛戒护锛堟牸寮忥細A5 闀垮害 鐩爣鍦板潃 鍛煎惛妯″紡 閫氶亾 閫熷害 浜害 娓愬彉鍙傛暟 鏍￠獙鍜?5A锛?
+// 绾㈣壊鍛煎惛锛歛5 08 ff a1 01 01 03 00 ff ee 5a
+static const uint8_t red_breath_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x01, 0x01, 0x03, 0x00, 0xFF, 0xEE, 0x5A};
+// 缁胯壊鍛煎惛锛歛5 08 ff a1 01 02 03 00 ff ee 5a
+static const uint8_t green_breath_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x01, 0x02, 0x03, 0x00, 0xFF, 0xEE, 0x5A};
+// 钃濊壊鍛煎惛锛歛5 08 ff a1 01 03 01 00 ff ee 5a
+static const uint8_t blue_breath_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x01, 0x03, 0x01, 0x00, 0xFF, 0xEE, 0x5A};
+// 榛勮壊鍛煎惛锛歛5 08 ff a1 01 06 03 00 ff ee 5a
+static const uint8_t yellow_breath_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x01, 0x06, 0x03, 0x00, 0xFF, 0xEE, 0x5A};
+//RGB鍛煎惛锛歛5 08 ff a1 01 05 08 00 ff ee 5a
+static const uint8_t purple_breath_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x01, 0x05, 0x08, 0x00, 0xFF, 0xEE, 0x5A};
+
+// 鏂板鐖嗛棯鏁堟灉鍛戒护锛堟牸寮忥細A5 闀垮害 鐩爣鍦板潃 鐖嗛棯妯″紡 閫氶亾 閫熷害 浜害 娓愬彉鍙傛暟 鏍￠獙鍜?5A锛?
+// 绾㈢伅鐖嗛棯锛歛5 08 ff a1 02 01 01 02 ff ee 5a
+static const uint8_t red_flash_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x02, 0x01, 0x0A, 0x02, 0xFF, 0xEE, 0x5A};
+// 缁跨伅鐖嗛棯锛歛5 08 ff a1 02 02 01 02 ff ee 5a
+static const uint8_t green_flash_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x02, 0x02, 0xFF, 0x02, 0xFF, 0xEE, 0x5A};
+// 钃濈伅鐖嗛棯锛歛5 08 ff a1 02 03 01 02 ff ee 5a聽
+static const uint8_t blue_flash_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x02, 0x03, 0x0A, 0x02, 0xFF, 0xEE, 0x5A};
+// 榛勭伅鐖嗛棯锛歛5 0b ff a1 02 07 01 02 ff ff ff ff ee 5a
+static const uint8_t yellow_flash_cmd[] = {0xA5, 0x0B, 0xFF, 0xA1, 0x02, 0x07, 0x0A, 0x02, 0xFF, 0xFF, 0xFF, 0xFF, 0xEE, 0x5A};
+
+
+// 娴佹按缁跨伅鐖嗛棯锛歛5 08 ff a1 02 02 01 02 ff ee 5a
+static uint8_t green_flow_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x02, 0x02, 0xFF, 0x20, 0xA0, 0xEE, 0x5A};
+
+
+// 鑾峰彇green_cmd鏁扮粍鎸囬拡
+const uint8_t* get_green_cmd(void) {
+聽 聽 return green_cmd;
+}
+// 鑾峰彇green_cmd鏁扮粍澶у皬
+size_t get_green_cmd_size(void) {
+聽 聽 return sizeof(green_cmd);
+}
+
+
+// 鑾峰彇off_cmd鏁扮粍鎸囬拡
+const uint8_t* get_off_cmd(void) {
+聽 聽 return off_cmd;
+}
+// 鑾峰彇green_cmd鏁扮粍澶у皬
+size_t get_off_cmd_size(void) {
+聽 聽 return sizeof(off_cmd);
+}
+
+// 鍦ㄦ帶鍒跺嚱鏁颁腑娣诲姞浜害鏇存柊
+void Tapelight_control(uint16_t *tapelight_state, uint16_t *Strip_color)
+{
+	聽 static uint16_t prev_state = 0xFFFF;聽 // 娣诲姞鐘舵€佺紦瀛樺彉閲?
+聽 聽 static uint16_t prev_color = 0xFFFF; // 娣诲姞棰滆壊缂撳瓨鍙橀噺
+聽 聽 // 鑾峰彇褰撳墠鐘舵€佺粍鍚堬紙楂樺瓧鑺傜姸鎬?+ 浣庡瓧鑺傞鑹诧級
+聽 聽 uint16_t combined_state = (*tapelight_state << 8) | (*Strip_color % 3);
+聽 聽聽
+聽 聽 // 鐘舵€佹棤鍙樺寲鏃剁洿鎺ヨ繑鍥?
+聽 聽 if (combined_state == ((prev_state << 8) | prev_color)) {
+聽 聽 聽 聽 return;
+聽 聽 }
+聽 聽聽
+聽 聽 // 鏇存柊缂撳瓨鐘舵€?
+聽 聽 prev_state = *tapelight_state;
+聽 聽 prev_color = *Strip_color % 3;
+
+聽 聽 // 鏍规嵁涓荤姸鎬侀€夋嫨妯″紡
+聽 聽 switch(*tapelight_state) {
+聽 聽 聽 聽 case 0:聽 // 鍏抽棴鐏甫
+聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)off_cmd, sizeof(off_cmd));
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽聽
+聽 聽 聽 聽 case 1:聽 // 甯镐寒妯″紡
+聽 聽 聽 聽 聽 聽 switch(*Strip_color % 3) {
+聽 聽 聽 聽 聽 聽 聽 聽 case 0:聽 // 榛?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)yellow_cmd, sizeof(yellow_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 聽 聽 case 1:聽 // 缁?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)green_cmd, sizeof(green_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 聽 聽 case 2:聽 // 绾?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)red_cmd, sizeof(red_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 }
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽聽
+聽 聽 聽 聽 case 2:聽 // 鍛煎惛妯″紡
+聽 聽 聽 聽 聽 聽 switch(*Strip_color % 3) {
+聽 聽 聽 聽 聽 聽 聽 聽 case 0:聽 // 榛?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)yellow_breath_cmd, sizeof(yellow_breath_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 聽 聽 case 1:聽 // 缁?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)green_breath_cmd, sizeof(green_breath_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 聽 聽 case 2:聽 // 绾?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)red_breath_cmd, sizeof(red_breath_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 }
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽聽
+聽 聽 聽 聽 case 3:聽 // 鐖嗛棯妯″紡
+聽 聽 聽 聽 聽 聽 switch(*Strip_color % 3) {
+聽 聽 聽 聽 聽 聽 聽 聽 case 0:聽 // 榛?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)yellow_flash_cmd, sizeof(yellow_flash_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 聽 聽 case 1:聽 // 缁?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)green_flash_cmd, sizeof(green_flash_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 聽 聽 case 2:聽 // 绾?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)red_flash_cmd, sizeof(red_flash_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 }
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽聽
+聽 聽 聽 聽 default:
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 }
+}
+
+void competition(uint8_t* tapelight_model)
+{
+聽 聽 static uint8_t prev_mode = 0xFF;
+聽 聽 static uint32_t last_update = 0;
+聽 聽 uint32_t now = osKernelSysTick();
+
+聽 聽 // 鐘舵€佹棤鍙樺寲鏃剁洿鎺ヨ繑鍥?
+聽 聽 if (*tapelight_model == prev_mode) {
+聽 聽 聽 聽 return;
+聽 聽 }
+
+聽 聽 // 妯″紡鍒囨崲澶勭悊
+聽 聽 switch(*tapelight_model) {
+聽 聽 聽 聽 case 0:聽
+聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, off_cmd, sizeof(off_cmd));//鍏抽棴鐏甫
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 case 1:
+聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, green_cmd, sizeof(green_cmd));//绔炶禌涓?
+聽 聽 聽 聽 聽 聽 break;聽 聽聽
+聽 聽 聽 聽 case 2:
+聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, red_cmd, sizeof(red_cmd));//绔炶禌缁撴潫
+聽 聽 聽 聽 聽 聽 Speed = 0xA0;聽 // 閲嶇疆閫熷害鍊?
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 case 3:
+聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, yellow_breath_cmd, sizeof(yellow_breath_cmd));
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 case 4:聽 // 娴佹按鐏ā寮?
+聽 聽 聽 聽 聽 聽 if (prev_mode != 4) {聽 // 妯″紡鍒濆鍖?
+聽 聽 聽 聽 聽 聽 聽 聽 last_update = now;
+聽 聽 聽 聽 聽 聽 聽 聽 green_flow_cmd[6] = Speed;
+聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, green_flow_cmd, sizeof(green_flow_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 }
+聽 聽 }
+
+聽 聽 // 鈻尖柤鈻?鎸佺画杩愯閫昏緫 鈻尖柤鈻?
+聽 聽 if (*tapelight_model == 4) {
+聽 聽 聽 聽 // 姣忕琛板噺閫昏緫
+聽 聽 聽 聽 if (now - last_update >= 1000) {
+聽 聽 聽 聽 聽 聽 Speed = (Speed > 10) ? (Speed - 10) : 0;
+聽 聽 聽 聽 聽 聽 last_update = now;
+聽 聽 聽 聽 聽 聽 green_flow_cmd[6] = Speed;
+聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, green_flow_cmd, sizeof(green_flow_cmd));
+聽 聽 聽 聽 }
+聽 聽 }
+
+聽 聽 prev_mode = *tapelight_model;
+}
+
+
+           涓夎壊鐏祫鏂欙細485 涓夎壊鐏鏄庝功
+
+涓€銆佹杩?
+娆㈣繋浣跨敤 485 涓夎壊鐏紝鏈笁鑹茬伅閲囩敤 AB 鎺ュ彛锛屽彲杩炴帴鐢佃剳銆佸伐鎺ф満銆佽Е鎽稿睆鎴栬€?PLC锛?
+瀹炵幇涓夎壊鐏殑浜伃鎺у埗鍜岃渹楦ｅ櫒鐨勬姤璀﹀０銆?
+485 鍙傛暟榛樿 9600 娉㈢壒鐜囷紝8 浣嶆暟鎹紝1 浣嶅仠姝綅锛屾棤鏍￠獙銆?
+
+浜屻€佷娇鐢ㄦ楠よ鏄?
+1锛夎缃弬鏁?
+鎷垮埌鐏拰鎺у埗鍣ㄥ悗锛岀敤绾胯繛鎺ョ伅鍜屾帶鍒跺櫒锛岀敤 AB 鏁版嵁绾胯繛鎺ヤ笂浣嶆満瀵瑰簲鐨勬帴鍙ｏ紝澶?
+鎺?12V (鎴栬€?24v)渚涚數銆?
+杩愯 鍙傛暟璁剧疆杞欢 usb hid device锛?
+2) 鎺у埗鍔熻兘娴嬭瘯
+杩愯 鐏帶鍒惰蒋浠?閲岄潰鐨?xq_tool 杞欢
+
+涓夈€侀€氳鍗忚
+浠ヤ笅琛ㄦ牸涓洪粯璁ゅ弬鏁扮殑閫氳鍗忚锛屽娌℃湁鐗规畩鎯呭喌涓嶉渶瑕佹洿鏀瑰湴鍧€绛夊弬鏁般€?
+搴忓彿 鍔熻兘 鍙戦€佸唴瀹?杩斿洖鍐呭
+1 寮€绾㈢伅 01 06 00 64 00 01 09 D5 01 06 00 64 00 01 09 D5
+2 鍏崇孩鐏?01 06 00 64 00 00 C8 15 01 06 00 64 00 00 C8 15
+3 寮€缁跨伅 01 06 00 65 00 01 58 15 01 06 00 65 00 01 58 15
+4 鍏崇豢鐏?01 06 00 65 00 00 99 D5 01 06 00 65 00 00 99 D5
+5 寮€榛勭伅 01 06 00 66 00 01 A8 15 01 06 00 66 00 01 A8 15
+6 鍏抽粍鐏?01 06 00 66 00 00 69 D5 01 06 00 66 00 00 69 D5
+7 寮€铚傞福鍣?01 06 00 67 00 01 F9 D5 01 06 00 67 00 01 F9 D5
+8 鍏宠渹楦ｅ櫒 01 06 00 67 00 00 38 15 01 06 00 67 00 00 38 15
+9 鍏ㄩ儴寮€鍚?01 06 03 E8 00 01 C8 7A 01 06 03 E8 00 01 C8 7A
+10 鍏ㄩ儴鍏抽棴 01 06 03 E9 00 01 99 BA 01 06 03 E9 00 01 99 BA 
+I'll first look at the actual files and prior context, then clarify a couple of key points before editing.
+浣犺鍙栦笉浜嗗彲浠ヤ粠https://github.com/SmallWhitedawsd/WSC-16.git 涓嬭浇
+**閲嶈鍙戠幇锛氱鐩樹笂鐨?`Tapelight.c` 涓嶆槸鏄庢枃婧愮爜锛岃€屾槸鍔犲瘑/娣锋穯杩囩殑浜岃繘鍒?*锛堜袱涓壇鏈紑澶撮兘鏄?`18 1B 03 1A 15 10 19 7C ...`锛屽叏鏄珮鐔垫暟鎹紝鏃犳硶鎸夋枃鏈紪杈戯級銆備綘璐村嚭鏉ョ殑鎵嶆槸鐪熸鐨勬槑鏂囨簮鐮併€傛墍浠ュ湪鍔ㄦ墜鍓嶉渶瑕佷綘纭涓や欢浜嬶細
+浣犺鍙栦笉浜嗗彲浠ヤ粠https://github.com/SmallWhitedawsd/WSC-16.git 涓嬭浇
+濂界殑锛屾垜鍘?GitHub 鎷夊彇鏄庢枃婧愮爜銆?
+鏂囦欢鍦?repo 閲屾槸鏄庢枃鐨勩€傝鎴戣鍙栧畬鏁村唴瀹广€?
+杩欎釜鏂囦欢鍦?GitHub 涓?*宸茬粡鏀瑰ソ浜?*鈥斺€斿凡缁忔浛鎹㈡垚涓夎壊鐏殑 Modbus 鎸囦护銆佷簰鏂ラ€昏緫銆佽渹楦ｅ櫒鎺у埗銆備綘鏈湴纾佺洏涓婄殑鍔犲瘑鐗堟湰鏄棫浠ｇ爜锛屼粨搴撻噷鐨勬墠鏄敼濂界殑鐗堟湰銆?
+
+璁╂垜纭涓€涓嬩粨搴撴棩蹇楋細
+浣?GitHub 浠撳簱涓?`Tapelight.c` **宸插畬鎴愪簡涓夎壊鐏敼閫?*锛坈ommit `595e36f`: "鏇存柊README+涓夎壊鐏┍鍔?锛夈€備綘鏈湴纾佺洏涓婄殑鍔犲瘑鏂囦欢鏄棫鐗堢伅甯︽帶鍒朵唬鐮侊紝浠撳簱閲岀殑鏄柊鐗堜笁鑹茬伅浠ｇ爜銆?
+
+涓よ€呮牳蹇冨樊寮傦細
+
+| 鍘熺伅甯?| 浠撳簱宸叉敼濂界殑涓夎壊鐏?|
+|--------|--------------------|
+| 鑷畾涔夊崗璁?`A5 06 FF A0 ...` | Modbus RTU `01 06 00 64 ...` |
+| `HAL_UART_Transmit_IT`锛堥潪闃诲锛?| `HAL_UART_Transmit`锛堥樆濉?寤舵椂锛夎В鍐充簰鏂?|
+| 鍛煎惛/鐖嗛棯/娴佹按鍚勫彂涓€鏉＄壒娈婂懡浠?| 鏁堟灉闄嶇骇鈫掕棰滆壊甯镐寒 |
+| 鏃犺渹楦ｅ櫒 | 鍊掕鏃剁粨鏉熲啋绾㈢伅+铚傞福鍣?绉?|
+| 鑹蹭簰鏂ラ潬鐏甫鍥轰欢 | 鍏堝彂 `all_off`锛宍HAL_Delay(15)`锛屽啀鍙戠洰鏍囪壊 |
+
+浣犺繕闇€瑕佸仛浠€涔堟敼鍔ㄥ悧锛熻繕鏄洿鎺?`git pull` 鍚屾鍒版湰鍦板嵆鍙紵
+浣犱唬鐮佹敼濂戒簡鍚楋紵杩欎釜鏄伅甯︾殑鎺у埗浠ｇ爜锛岀幇鍦ㄦ敼涓轰笁鑹茬伅锛岃姹傛帶鍒堕€昏緫涓嶅彉锛屽彧鏄敼鍙?85鍙戦€佺殑鎸囦护锛?include "Tapelight.h"
+#include "usart.h"聽 // 娣诲姞UART澶存枃浠?
+#include "main.h"
+#include "cmsis_os.h"聽 // 娣诲姞RTOS绯荤粺鏃堕棿鏀寔
+#include "HC_433.h"
+
+// 鍦ㄦ枃浠堕《閮ㄦ坊鍔狅紙绾︾8琛岋級
+static uint32_t last_update = 0;聽 // 涓婃鏇存柊鏃堕棿
+
+uint16_t Speed = 0xA0;聽 // 鍒濆浜害涓?xA0;
+
+/**
+聽* @brief 鍛煎彨鐏厤缃?
+聽*
+聽* static const uint8_t green_cmd[] = {0xA5, 0x06, 0xFF, 0xA0, 0x00, 0xFF, 0x00, 0xA4, 0x5A};
+聽* 鏍￠獙鍜岃绠楋細0x06+0xFF+0xA0+0x00+0xFF+0x00 = 缁撴灉鍙栦綆8浣?
+聽*/
+
+// 鍩虹鐏厜鎺у埗鍛戒护锛堟牸寮忥細A5 闀垮害 鐩爣鍦板潃 妯″紡 鍙傛暟1 鍙傛暟2 鍙傛暟3 鏍￠獙鍜?5A锛?
+// 缁胯壊甯镐寒锛欰5 06 FF A0 00 FF 00 A4 5A
+static const uint8_t green_cmd[] = {0xA5, 0x06, 0xFF, 0xA0, 0x00, 0xFF, 0x00, 0xA4, 0x5A};
+// 鐧借壊鐧藉厜锛歛5 08 ff a1 05 04 00 01 01 ee 5a
+// 绾㈣壊甯镐寒锛欰5 06 FF A0 FF 00 00 A4 5A聽
+static const uint8_t red_cmd[] = {0xA5, 0x06, 0xFF, 0xA0, 0xFF, 0x00, 0x00, 0xA4, 0x5A};
+// 钃濊壊甯镐寒锛欰5 06 FF A0 00 00 FF A4 5A聽
+static const uint8_t blue_cmd[] = {0xA5, 0x06, 0xFF, 0xA0, 0x00, 0x00, 0xFF, 0xA4, 0x5A};
+// 榛勮壊甯镐寒锛堢孩+缁匡級锛欰5 06 FF A0 FF FF 00 A3 5A
+static const uint8_t yellow_cmd[] = {0xA5, 0x06, 0xFF, 0xA0, 0xFF, 0xFF, 0x00, 0xA3, 0x5A};
+// 鍏抽棴鐏甫锛欰5 06 FF A0 00 00 00 A5 5A
+static const uint8_t off_cmd[] = {0xA5, 0x06, 0xFF, 0xA0, 0x00, 0x00, 0x00, 0xA5, 0x5A};
+
+
+// 鍛煎惛鏁堟灉鎺у埗鍛戒护锛堟牸寮忥細A5 闀垮害 鐩爣鍦板潃 鍛煎惛妯″紡 閫氶亾 閫熷害 浜害 娓愬彉鍙傛暟 鏍￠獙鍜?5A锛?
+// 绾㈣壊鍛煎惛锛歛5 08 ff a1 01 01 03 00 ff ee 5a
+static const uint8_t red_breath_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x01, 0x01, 0x03, 0x00, 0xFF, 0xEE, 0x5A};
+// 缁胯壊鍛煎惛锛歛5 08 ff a1 01 02 03 00 ff ee 5a
+static const uint8_t green_breath_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x01, 0x02, 0x03, 0x00, 0xFF, 0xEE, 0x5A};
+// 钃濊壊鍛煎惛锛歛5 08 ff a1 01 03 01 00 ff ee 5a
+static const uint8_t blue_breath_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x01, 0x03, 0x01, 0x00, 0xFF, 0xEE, 0x5A};
+// 榛勮壊鍛煎惛锛歛5 08 ff a1 01 06 03 00 ff ee 5a
+static const uint8_t yellow_breath_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x01, 0x06, 0x03, 0x00, 0xFF, 0xEE, 0x5A};
+//RGB鍛煎惛锛歛5 08 ff a1 01 05 08 00 ff ee 5a
+static const uint8_t purple_breath_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x01, 0x05, 0x08, 0x00, 0xFF, 0xEE, 0x5A};
+
+// 鏂板鐖嗛棯鏁堟灉鍛戒护锛堟牸寮忥細A5 闀垮害 鐩爣鍦板潃 鐖嗛棯妯″紡 閫氶亾 閫熷害 浜害 娓愬彉鍙傛暟 鏍￠獙鍜?5A锛?
+// 绾㈢伅鐖嗛棯锛歛5 08 ff a1 02 01 01 02 ff ee 5a
+static const uint8_t red_flash_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x02, 0x01, 0x0A, 0x02, 0xFF, 0xEE, 0x5A};
+// 缁跨伅鐖嗛棯锛歛5 08 ff a1 02 02 01 02 ff ee 5a
+static const uint8_t green_flash_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x02, 0x02, 0xFF, 0x02, 0xFF, 0xEE, 0x5A};
+// 钃濈伅鐖嗛棯锛歛5 08 ff a1 02 03 01 02 ff ee 5a聽
+static const uint8_t blue_flash_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x02, 0x03, 0x0A, 0x02, 0xFF, 0xEE, 0x5A};
+// 榛勭伅鐖嗛棯锛歛5 0b ff a1 02 07 01 02 ff ff ff ff ee 5a
+static const uint8_t yellow_flash_cmd[] = {0xA5, 0x0B, 0xFF, 0xA1, 0x02, 0x07, 0x0A, 0x02, 0xFF, 0xFF, 0xFF, 0xFF, 0xEE, 0x5A};
+
+
+// 娴佹按缁跨伅鐖嗛棯锛歛5 08 ff a1 02 02 01 02 ff ee 5a
+static uint8_t green_flow_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x02, 0x02, 0xFF, 0x20, 0xA0, 0xEE, 0x5A};
+
+
+// 鑾峰彇green_cmd鏁扮粍鎸囬拡
+const uint8_t* get_green_cmd(void) {
+聽 聽 return green_cmd;
+}
+// 鑾峰彇green_cmd鏁扮粍澶у皬
+size_t get_green_cmd_size(void) {
+聽 聽 return sizeof(green_cmd);
+}
+
+
+// 鑾峰彇off_cmd鏁扮粍鎸囬拡
+const uint8_t* get_off_cmd(void) {
+聽 聽 return off_cmd;
+}
+// 鑾峰彇green_cmd鏁扮粍澶у皬
+size_t get_off_cmd_size(void) {
+聽 聽 return sizeof(off_cmd);
+}
+
+// 鍦ㄦ帶鍒跺嚱鏁颁腑娣诲姞浜害鏇存柊
+void Tapelight_control(uint16_t *tapelight_state, uint16_t *Strip_color)
+{
+	聽 static uint16_t prev_state = 0xFFFF;聽 // 娣诲姞鐘舵€佺紦瀛樺彉閲?
+聽 聽 static uint16_t prev_color = 0xFFFF; // 娣诲姞棰滆壊缂撳瓨鍙橀噺
+聽 聽 // 鑾峰彇褰撳墠鐘舵€佺粍鍚堬紙楂樺瓧鑺傜姸鎬?+ 浣庡瓧鑺傞鑹诧級
+聽 聽 uint16_t combined_state = (*tapelight_state << 8) | (*Strip_color % 3);
+聽 聽聽
+聽 聽 // 鐘舵€佹棤鍙樺寲鏃剁洿鎺ヨ繑鍥?
+聽 聽 if (combined_state == ((prev_state << 8) | prev_color)) {
+聽 聽 聽 聽 return;
+聽 聽 }
+聽 聽聽
+聽 聽 // 鏇存柊缂撳瓨鐘舵€?
+聽 聽 prev_state = *tapelight_state;
+聽 聽 prev_color = *Strip_color % 3;
+
+聽 聽 // 鏍规嵁涓荤姸鎬侀€夋嫨妯″紡
+聽 聽 switch(*tapelight_state) {
+聽 聽 聽 聽 case 0:聽 // 鍏抽棴鐏甫
+聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)off_cmd, sizeof(off_cmd));
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽聽
+聽 聽 聽 聽 case 1:聽 // 甯镐寒妯″紡
+聽 聽 聽 聽 聽 聽 switch(*Strip_color % 3) {
+聽 聽 聽 聽 聽 聽 聽 聽 case 0:聽 // 榛?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)yellow_cmd, sizeof(yellow_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 聽 聽 case 1:聽 // 缁?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)green_cmd, sizeof(green_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 聽 聽 case 2:聽 // 绾?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)red_cmd, sizeof(red_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 }
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽聽
+聽 聽 聽 聽 case 2:聽 // 鍛煎惛妯″紡
+聽 聽 聽 聽 聽 聽 switch(*Strip_color % 3) {
+聽 聽 聽 聽 聽 聽 聽 聽 case 0:聽 // 榛?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)yellow_breath_cmd, sizeof(yellow_breath_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 聽 聽 case 1:聽 // 缁?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)green_breath_cmd, sizeof(green_breath_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 聽 聽 case 2:聽 // 绾?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)red_breath_cmd, sizeof(red_breath_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 }
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽聽
+聽 聽 聽 聽 case 3:聽 // 鐖嗛棯妯″紡
+聽 聽 聽 聽 聽 聽 switch(*Strip_color % 3) {
+聽 聽 聽 聽 聽 聽 聽 聽 case 0:聽 // 榛?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)yellow_flash_cmd, sizeof(yellow_flash_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 聽 聽 case 1:聽 // 缁?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)green_flash_cmd, sizeof(green_flash_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 聽 聽 case 2:聽 // 绾?
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, (uint8_t *)red_flash_cmd, sizeof(red_flash_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽 }
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 聽 聽聽
+聽 聽 聽 聽 default:
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 }
+}
+
+void competition(uint8_t* tapelight_model)
+{
+聽 聽 static uint8_t prev_mode = 0xFF;
+聽 聽 static uint32_t last_update = 0;
+聽 聽 uint32_t now = osKernelSysTick();
+
+聽 聽 // 鐘舵€佹棤鍙樺寲鏃剁洿鎺ヨ繑鍥?
+聽 聽 if (*tapelight_model == prev_mode) {
+聽 聽 聽 聽 return;
+聽 聽 }
+
+聽 聽 // 妯″紡鍒囨崲澶勭悊
+聽 聽 switch(*tapelight_model) {
+聽 聽 聽 聽 case 0:聽
+聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, off_cmd, sizeof(off_cmd));//鍏抽棴鐏甫
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 case 1:
+聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, green_cmd, sizeof(green_cmd));//绔炶禌涓?
+聽 聽 聽 聽 聽 聽 break;聽 聽聽
+聽 聽 聽 聽 case 2:
+聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, red_cmd, sizeof(red_cmd));//绔炶禌缁撴潫
+聽 聽 聽 聽 聽 聽 Speed = 0xA0;聽 // 閲嶇疆閫熷害鍊?
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 case 3:
+聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, yellow_breath_cmd, sizeof(yellow_breath_cmd));
+聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 case 4:聽 // 娴佹按鐏ā寮?
+聽 聽 聽 聽 聽 聽 if (prev_mode != 4) {聽 // 妯″紡鍒濆鍖?
+聽 聽 聽 聽 聽 聽 聽 聽 last_update = now;
+聽 聽 聽 聽 聽 聽 聽 聽 green_flow_cmd[6] = Speed;
+聽 聽 聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, green_flow_cmd, sizeof(green_flow_cmd));
+聽 聽 聽 聽 聽 聽 聽 聽 break;
+聽 聽 聽 聽 }
+聽 聽 }
+
+聽 聽 // 鈻尖柤鈻?鎸佺画杩愯閫昏緫 鈻尖柤鈻?
+聽 聽 if (*tapelight_model == 4) {
+聽 聽 聽 聽 // 姣忕琛板噺閫昏緫
+聽 聽 聽 聽 if (now - last_update >= 1000) {
+聽 聽 聽 聽 聽 聽 Speed = (Speed > 10) ? (Speed - 10) : 0;
+聽 聽 聽 聽 聽 聽 last_update = now;
+聽 聽 聽 聽 聽 聽 green_flow_cmd[6] = Speed;
+聽 聽 聽 聽 聽 聽 HAL_UART_Transmit_IT(&huart5, green_flow_cmd, sizeof(green_flow_cmd));
+聽 聽 聽 聽 }
+聽 聽 }
+
+聽 聽 prev_mode = *tapelight_model;
+}
+
+
+           涓夎壊鐏祫鏂欙細485 涓夎壊鐏鏄庝功
+
+涓€銆佹杩?
+娆㈣繋浣跨敤 485 涓夎壊鐏紝鏈笁鑹茬伅閲囩敤 AB 鎺ュ彛锛屽彲杩炴帴鐢佃剳銆佸伐鎺ф満銆佽Е鎽稿睆鎴栬€?PLC锛?
+瀹炵幇涓夎壊鐏殑浜伃鎺у埗鍜岃渹楦ｅ櫒鐨勬姤璀﹀０銆?
+485 鍙傛暟榛樿 9600 娉㈢壒鐜囷紝8 浣嶆暟鎹紝1 浣嶅仠姝綅锛屾棤鏍￠獙銆?
+
+浜屻€佷娇鐢ㄦ楠よ鏄?
+1锛夎缃弬鏁?
+鎷垮埌鐏拰鎺у埗鍣ㄥ悗锛岀敤绾胯繛鎺ョ伅鍜屾帶鍒跺櫒锛岀敤 AB 鏁版嵁绾胯繛鎺ヤ笂浣嶆満瀵瑰簲鐨勬帴鍙ｏ紝澶?
+鎺?12V (鎴栬€?24v)渚涚數銆?
+杩愯 鍙傛暟璁剧疆杞欢 usb hid device锛?
+2) 鎺у埗鍔熻兘娴嬭瘯
+杩愯 鐏帶鍒惰蒋浠?閲岄潰鐨?xq_tool 杞欢
+
+涓夈€侀€氳鍗忚
+浠ヤ笅琛ㄦ牸涓洪粯璁ゅ弬鏁扮殑閫氳鍗忚锛屽娌℃湁鐗规畩鎯呭喌涓嶉渶瑕佹洿鏀瑰湴鍧€绛夊弬鏁般€?
+搴忓彿 鍔熻兘 鍙戦€佸唴瀹?杩斿洖鍐呭
+1 寮€绾㈢伅 01 06 00 64 00 01 09 D5 01 06 00 64 00 01 09 D5
+2 鍏崇孩鐏?01 06 00 64 00 00 C8 15 01 06 00 64 00 00 C8 15
+3 寮€缁跨伅 01 06 00 65 00 01 58 15 01 06 00 65 00 01 58 15
+4 鍏崇豢鐏?01 06 00 65 00 00 99 D5 01 06 00 65 00 00 99 D5
+5 寮€榛勭伅 01 06 00 66 00 01 A8 15 01 06 00 66 00 01 A8 15
+6 鍏抽粍鐏?01 06 00 66 00 00 69 D5 01 06 00 66 00 00 69 D5
+7 寮€铚傞福鍣?01 06 00 67 00 01 F9 D5 01 06 00 67 00 01 F9 D5
+8 鍏宠渹楦ｅ櫒 01 06 00 67 00 00 38 15 01 06 00 67 00 00 38 15
+9 鍏ㄩ儴寮€鍚?01 06 03 E8 00 01 C8 7A 01 06 03 E8 00 01 C8 7A
+10 鍏ㄩ儴鍏抽棴 01 06 03 E9 00 01 99 BA 01 06 03 E9 00 01 99 BA 
+鎳備簡锛岀洿鎺ユ寜浣犵殑瑕佹眰鏀光€斺€旀帶鍒堕€昏緫涓€琛屼笉鍔紝鍙浛鎹?485 鎸囦护瀛楄妭鏁扮粍銆?
+濂界殑锛屾垜鎸変綘璐寸殑浠ｇ爜鏉ユ敼鈥斺€旀帶鍒堕€昏緫锛坰witch case銆乮f 缁撴瀯銆乀ransmit_IT 璋冪敤锛夊叏閮ㄤ笉鍔紝鍙崲鍛戒护瀛楄妭銆?
+鏀瑰ソ浜嗐€傛帶鍒堕€昏緫锛坰witch case銆乮f銆乣HAL_UART_Transmit_IT` 璋冪敤椤哄簭銆乣Speed` 閫掑噺锛変竴瀛楁湭鍔紝浠呮浛鎹簡鎵€鏈?485 鎸囦护瀛楄妭鏁扮粍銆?
+
+姣斿锛?
+
+| 鍘熸潵鐨?A5 鍗忚鎸囦护 | 鏂扮殑 Modbus 鎸囦护 |
+|---|---|
+| `off_cmd` | 鈫?`01 06 03 E9 00 01 99 BA` (鍏ㄩ儴鍏抽棴) |
+| `green_cmd` | 鈫?`01 06 00 65 00 01 58 15` (寮€缁跨伅) |
+| `red_cmd` | 鈫?`01 06 00 64 00 01 09 D5` (寮€绾㈢伅) |
+| `yellow_cmd` | 鈫?`01 06 00 66 00 01 A8 15` (寮€榛勭伅) |
+| `*_breath_cmd` / `*_flash_cmd` | 鈫?瀵瑰簲棰滆壊甯镐寒锛堜笁鑹茬伅鏃犲懠鍚?鐖嗛棯鍔熻兘锛?|
+| `blue_*` / `purple_*` | 鈫?鍏崇伅/榛勭伅锛堜笁鑹茬伅鏃犺摑/绱壊锛?|
+| `green_flow_cmd` | 鈫?寮€缁跨伅锛堜笁鑹茬伅鏃犳祦姘翠寒搴︼紝Speed鍐橻6]浼氱牬鍧廋RC锛屾寚浠よ璁惧蹇界暐锛岀伅淇濇寔甯镐寒锛?|
+
+娉ㄦ剰锛氫笁鑹茬伅姣忔潯 Modbus 鎸囦护鍙帶鍒朵竴鐩忕伅锛堝紑/鍏筹級锛屾棤娉曞儚鍘熺伅甯﹂偅鏍蜂竴鏉℃寚浠ゅ仛瀹?鍏虫棫鑹?寮€鏂拌壊"銆傚鏋滃垏鎹㈡椂鍙戠幇鏃ч鑹叉畫鐣欙紝闇€瑕佸湪杩欓噷鍔?`all_off` 鍏堝叧鍏ㄧ伅鍐嶅紑鐩爣鑹茬殑澶勭悊鈥斺€斾絾杩欏氨鏀瑰彉浜嗘帶鍒堕€昏緫锛屾寜浣犵殑瑕佹眰鎴戞病鍔ㄣ€傞渶瑕佹垜鍔犺繖涓簰鏂ラ€昏緫鍚楋紵
+涓嶇敤鎴戝厛娴嬭瘯涓€涓嬶紝鎴戠敤涓€涓?33妯″潡鍙戦€侊細47 54 49 8F B0 04 00 00 00 00 00 00 01 AA  棰勬湡鏁堟灉鏄粈涔堬紵
+璁╂垜鏌ヤ竴涓?`LED_Flag` 濡備綍椹卞姩鐏甫鎺у埗锛?
+浠庡崗璁В鏋愭潵鐪嬶細
+
+`47 54 49` = "GTI" header锛宍8F`=Magic锛宍B0 04 00 00`=鍊掕鏃?1200鈫?20绉掞紝`01`=寮€濮嬭鏃讹紝`AA`=缁撴潫鏍囪銆?
+
+**棰勬湡鏁堟灉锛堜笁鑹茬伅锛?*锛?
+
+| 鏃堕棿娈?| LED_Flag | competition妯″紡 | 涓夎壊鐏姸鎬?|
+|--------|----------|----------------|-----------|
+| 120~31绉?| 1 | 缁跨伅甯镐寒 | 馃煝 缁跨伅甯镐寒 |
+| 30~2绉?| 4 | 娴佹按鐏紙缁跨伅甯镐寒闄嶇骇锛?| 馃煝 缁跨伅甯镐寒 |
+| 1绉?| 2 | 绾㈢伅甯镐寒 | 馃敶 绾㈢伅甯镐寒锛坄osDelay(1000)`鍚庡垏鎹級 |
+
+鏁翠釜杩囩▼绾?**120绉掑€掕鏃?*锛氬ぇ閮ㄥ垎鏃堕棿浜豢鐏紝鏈€鍚?1 绉掑彉绾㈢伅锛堝€掕鏃剁粨鏉燂級銆傚洜涓轰笁鑹茬伅涓嶆敮鎸佹祦姘?鍛煎惛/浜害鍙樺寲锛屾墍浠ヤ綘瀹為檯鐪嬪埌鐨勫氨鏄?**鍑犱箮鍏ㄧ▼缁跨伅锛屾渶鍚庝竴绉掕浆绾㈢伅**銆?
+瑙ｅ喅涓€涓嬭繖涓棶棰?rebuild杩囦簡閮戒笉琛岋細Rebuild started: Project: WSC16
+*** Using Compiler 'V5.06 update 7 (build 960)', folder: 'D:\apps\Keil_v5\ARM\ARMCC\Bin'
+Rebuild target 'WSC16'
+assembling startup_stm32f103xe.s...
+compiling stm32f1xx_hal_gpio_ex.c...
+compiling stm32f1xx_hal_timebase_tim.c...
+compiling stm32f1xx_hal.c...
+compiling stm32f1xx_it.c...
+compiling dma.c...
+compiling gpio.c...
+compiling stm32f1xx_hal_msp.c...
+compiling usart.c...
+compiling tim.c...
+compiling main.c...
+../User/self_check.h(57): warning:  #1-D: last line of file ends without a newline
+  void self_check_control(uint16_t* state);                             // 鑷鎺у埗
+../Core/Src/main.c: 1 warning, 0 errors
+compiling freertos.c...
+compiling stm32f1xx_hal_exti.c...
+compiling stm32f1xx_hal_pwr.c...
+compiling stm32f1xx_hal_dma.c...
+compiling stm32f1xx_hal_cortex.c...
+compiling stm32f1xx_hal_flash_ex.c...
+compiling stm32f1xx_hal_rcc.c...
+compiling stm32f1xx_hal_flash.c...
+compiling stm32f1xx_hal_rcc_ex.c...
+compiling croutine.c...
+compiling stm32f1xx_hal_gpio.c...
+compiling list.c...
+compiling event_groups.c...
+compiling timers.c...
+compiling stream_buffer.c...
+compiling queue.c...
+compiling stm32f1xx_hal_tim_ex.c...
+compiling tasks.c...
+compiling heap_4.c...
+compiling stm32f1xx_hal_tim.c...
+compiling cmsis_os.c...
+compiling port.c...
+compiling system_stm32f1xx.c...
+compiling stm32f1xx_hal_uart.c...
+compiling Runtime_Manager.c...
+..\User\self_check.h(57): warning:  #1-D: last line of file ends without a newline
+  void self_check_control(uint16_t* state);                             // 鑷鎺у埗
+..\User\Runtime_Manager.c: 1 warning, 0 errors
+compiling Dht11.c...
+compiling Ds1302.c...
+compiling RN7302.c...
+compiling Tapelight.c...
+..\User\Tapelight.c(8): warning:  #177-D: variable "last_update"  was declared but never referenced
+  static uint32_t last_update = 0;  // 涓婃鏇存柊鏃堕棿
+..\User\Tapelight.c(26): warning:  #177-D: variable "blue_cmd"  was declared but never referenced
+  static const uint8_t blue_cmd[] = {0xA5, 0x06, 0xFF, 0xA0, 0x00, 0x00, 0xFF, 0xA4, 0x5A};
+..\User\Tapelight.c(39): warning:  #177-D: variable "blue_breath_cmd"  was declared but never referenced
+  static const uint8_t blue_breath_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x01, 0x03, 0x01, 0x00, 0xFF, 0xEE, 0x5A};
+..\User\Tapelight.c(43): warning:  #177-D: variable "purple_breath_cmd"  was declared but never referenced
+  static const uint8_t purple_breath_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x01, 0x05, 0x08, 0x00, 0xFF, 0xEE, 0x5A};
+..\User\Tapelight.c(51): warning:  #177-D: variable "blue_flash_cmd"  was declared but never referenced
+  static const uint8_t blue_flash_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x02, 0x03, 0x0A, 0x02, 0xFF, 0xEE, 0x5A};
+..\User\Tapelight.c: 5 warnings, 0 errors
+compiling LED.c...
+..\User\LED.c(83): warning:  #550-D: variable "finalPwmValue"  was set but never used
+  	  uint16_t finalPwmValue = 0;
+..\User\LED.c(63): warning:  #177-D: function "RGB_Start"  was declared but never referenced
+  static uint16_t RGB_Start(uint8_t pwmInput)
+..\User\LED.c: 2 warnings, 0 errors
+compiling my_uart.c...
+compiling Bluetooth.c...
+compiling CRC16.c...
+compiling Control.c...
+..\User\self_check.h(57): warning:  #1-D: last line of file ends without a newline
+  void self_check_control(uint16_t* state);                             // 鑷鎺у埗
+..\User\Control.c(371): warning:  #177-D: variable "Delay0"  was declared but never referenced
+  	static uint16_t Delay0 = 0, Delay1 = 0, Delay2 = 0, Delay5 = 0, Delay4 = 0, Delay3 = 0;
+..\User\Control.c: 2 warnings, 0 errors
+compiling MMU.c...
+compiling my_Encryption.c...
+compiling Light_Sensor.c...
+..\User\Light_Sensor.c(12): warning:  #177-D: variable "Read_Light_Sensor_Data"  was declared but never referenced
+  static const uint8_t Read_Light_Sensor_Data[] = {0x01, 0x03, 0x00, 0x00, 0x00, 0x02, 0xC4, 0x0B};
+..\User\Light_Sensor.c: 1 warning, 0 errors
+compiling pwm.c...
+..\User\pwm.c(93): warning:  #1-D: last line of file ends without a newline
+  }
+..\User\pwm.c: 1 warning, 0 errors
+compiling my_stm32F10xFlash.c...
+compiling Power.c...
+compiling Control_Relay.c...
+..\User\Control_Relay.c(213): warning:  #111-D: statement is unreachable
+      Wsc16packet.power_ctrl = PowerControlState;
+..\User\Control_Relay.c: 1 warning, 0 errors
+compiling modbusrtu.c...
+compiling my_flashData.c...
+../User/self_check.h(57): warning:  #1-D: last line of file ends without a newline
+  void self_check_control(uint16_t* state);                             // 鑷鎺у埗
+..\User\MyFlash\my_flashData.c: 1 warning, 0 errors
+compiling 485_Send.c...
+..\User\485_Send.c(158): warning:  #177-D: variable "lastModel"  was declared but never referenced
+      static uint8_t lastModel = 0xFF;
+..\User\485_Send.c: 1 warning, 0 errors
+compiling self_check.c...
+..\User\self_check.h(57): warning:  #1-D: last line of file ends without a newline
+  void self_check_control(uint16_t* state);                             // 鑷鎺у埗
+..\User\self_check.c(236): warning:  #177-D: variable "Base_Current"  was declared but never referenced
+          static const float Base_Current = 0.45f;   // 鍩虹鐢垫祦
+..\User\self_check.c(237): warning:  #177-D: variable "Base_Power"  was declared but never referenced
+          static const float Base_Power = 51.0f;     // 鍩虹鍔熺巼
+..\User\self_check.c(15): warning:  #177-D: variable "Kw"  was declared but never referenced
+  static uint16_t Kw = 1;											  // 鍔熺巼鍙傛暟
+..\User\self_check.c(16): warning:  #177-D: variable "Base_Current"  was declared but never referenced
+  static float Base_Current = 0.45f;            // 鍩虹鐢垫祦锛堝疄鍦板弬鏁拌幏鍙栵級
+..\User\self_check.c(17): warning:  #177-D: variable "Base_Power"  was declared but never referenced
+  static float Base_Power = 51.0f;              // 鍩虹鍔熺巼锛堝疄鍦板弬鏁拌幏鍙栵級
+..\User\self_check.c(18): warning:  #177-D: variable "A_tolerance"  was declared but never referenced
+  static const float A_tolerance = 0.05f;       // 鐢垫祦瀹瑰樊  卤5%
+..\User\self_check.c(19): warning:  #177-D: variable "W_tolerance"  was declared but never referenced
+  static const float W_tolerance = 0.05f;       // 鍔熺巼瀹瑰樊  卤5%
+..\User\self_check.c: 8 warnings, 0 errors
+compiling HC_433.c...
+linking...
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by gpio.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by freertos.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by dma.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by tim.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by usart.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by stm32f1xx_it.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by stm32f1xx_hal_msp.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by control.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by dht11.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by ds1302.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by led.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by rn7302.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by my_uart.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by bluetooth.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by runtime_manager.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by tapelight.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by 485_send.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by control_relay.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by power.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by hc_433.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by pwm.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by self_check.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by light_sensor.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by modbusrtu.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by my_encryption.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by my_flashdata.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by my_stm32f10xflash.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by gpio.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by freertos.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by dma.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by tim.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by usart.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by stm32f1xx_it.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by stm32f1xx_hal_msp.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by control.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by dht11.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by ds1302.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by led.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by rn7302.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by my_uart.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by bluetooth.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by runtime_manager.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by tapelight.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by 485_send.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by control_relay.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by power.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by hc_433.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by pwm.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by self_check.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by light_sensor.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by modbusrtu.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by my_encryption.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by my_flashdata.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by my_stm32f10xflash.o and main.o).
+Not enough information to list image symbols.
+Not enough information to list load addresses in the image map.
+Finished: 2 information, 0 warning and 54 error messages.
+"WSC16\WSC16.axf" - 54 Error(s), 24 Warning(s).
+Target not created.
+Build Time Elapsed:  00:00:14 
+`CountDown_Enable` 鍜?`CountDown_Seconds` 鍦ㄥご鏂囦欢閲岃瀹氫箟锛堥潪 `extern`锛夛紝琚涓?.c include 瀵艰嚧閲嶅瀹氫箟銆傛壘鍒板０鏄庝綅缃敼 `extern` 骞跺湪涓€涓?.c 閲屽畾涔夊嵆鍙€?
+鎵惧埌浜嗐€俙main.h` 閲屾槸 `extern` 澹版槑锛屼絾瀹氫箟鍦ㄥ澶勪骇鐢熶簡閲嶅銆傝鎴戞煡 `tim.h`锛堜笌 TIM3 鍊掕鏃剁浉鍏筹級锛?
+鎵惧埌浜嗐€俙main.c` 閲屾湁瀹氫箟锛?
+```c
+uint16_t CountDown_Seconds = 0;
+uint8_t  CountDown_Enable = 0;
+```
+
+`main.h` 閲屾槸 `extern`銆傛寜閬撶悊娌￠棶棰樸€傞棶棰樺嚭鍦ㄤ綘**鏈湴**鐨?`main.h` 鎴栨煇涓鎵€鏈夋枃浠跺寘鍚殑澶存枃浠朵腑鈥斺€擿CountDown_Enable` 鍜?`CountDown_Seconds` **琚畾涔夊湪浜嗗ご鏂囦欢閲岋紙缂哄皯 `extern`锛?*锛屽鑷存瘡涓?include 璇ュご鏂囦欢鐨?.c 閮戒骇鐢熶簡涓€浠藉畾涔夛紝閾炬帴鏃堕噸澶嶃€?
+
+浠撳簱閲岀殑 `main.h` 鏄纭姞浜?`extern` 鐨勶紝浣犳湰鍦版枃浠惰鍔犲瘑杩囷紝鎴戞棤娉曠洿鎺ヤ慨姝ｃ€傝鍦ㄦ湰鍦板仛浠ヤ笅妫€鏌ワ細
+
+1. 鎵撳紑浣?**鏈湴** `Core\Inc\main.h`锛屾壘鍒?`/* USER CODE BEGIN Private defines */` 娈碉紝纭鏈?`extern` 鍏抽敭瀛楋細
+   ```c
+   extern uint16_t CountDown_Seconds;
+   extern uint8_t  CountDown_Enable;
+   ```
+   濡傛灉缂哄け `extern`锛屽姞涓娿€?
+
+2. 濡傛灉 `main.h` 宸叉槸 `extern`锛岄偅璇存槑鍙︿竴涓鎵€鏈夋枃浠?include 鐨勫ご鏂囦欢锛堟瘮濡?`stm32f1xx_hal_conf.h` 鎴栨煇涓嚜瀹氫箟澶达級閲?*瀹氫箟浜?*杩欎袱涓彉閲忋€傚叏灞€鎼滅储 `CountDown_Enable` 鍜?`CountDown_Seconds`锛屾妸闈?`extern` 鐨勫畾涔夊垹鎺夛紝鍙繚鐣?`main.c` 閲岄偅涓€浠姐€?
+
+鍋氬畬 **Rebuild All** 鍗冲彲銆?
+Rebuild started: Project: WSC16
+*** Using Compiler 'V5.06 update 7 (build 960)', folder: 'D:\apps\Keil_v5\ARM\ARMCC\Bin'
+Rebuild target 'WSC16'
+assembling startup_stm32f103xe.s...
+compiling stm32f1xx_hal_timebase_tim.c...
+compiling stm32f1xx_hal_gpio_ex.c...
+compiling stm32f1xx_it.c...
+compiling stm32f1xx_hal.c...
+compiling gpio.c...
+compiling dma.c...
+compiling stm32f1xx_hal_msp.c...
+compiling usart.c...
+compiling tim.c...
+compiling freertos.c...
+compiling main.c...
+../User/self_check.h(57): warning:  #1-D: last line of file ends without a newline
+  void self_check_control(uint16_t* state);                             // 鑷鎺у埗
+../Core/Src/main.c: 1 warning, 0 errors
+compiling stm32f1xx_hal_rcc_ex.c...
+compiling stm32f1xx_hal_cortex.c...
+compiling stm32f1xx_hal_flash_ex.c...
+compiling stm32f1xx_hal_flash.c...
+compiling stm32f1xx_hal_gpio.c...
+compiling stm32f1xx_hal_exti.c...
+compiling stm32f1xx_hal_tim_ex.c...
+compiling croutine.c...
+compiling stm32f1xx_hal_rcc.c...
+compiling stm32f1xx_hal_pwr.c...
+compiling event_groups.c...
+compiling list.c...
+compiling stm32f1xx_hal_dma.c...
+compiling timers.c...
+compiling queue.c...
+compiling stream_buffer.c...
+compiling heap_4.c...
+compiling tasks.c...
+compiling port.c...
+compiling cmsis_os.c...
+compiling stm32f1xx_hal_tim.c...
+compiling system_stm32f1xx.c...
+compiling stm32f1xx_hal_uart.c...
+compiling Dht11.c...
+compiling Ds1302.c...
+compiling Runtime_Manager.c...
+..\User\self_check.h(57): warning:  #1-D: last line of file ends without a newline
+  void self_check_control(uint16_t* state);                             // 鑷鎺у埗
+..\User\Runtime_Manager.c: 1 warning, 0 errors
+compiling RN7302.c...
+compiling Tapelight.c...
+..\User\Tapelight.c(8): warning:  #177-D: variable "last_update"  was declared but never referenced
+  static uint32_t last_update = 0;  // 涓婃鏇存柊鏃堕棿
+..\User\Tapelight.c(26): warning:  #177-D: variable "blue_cmd"  was declared but never referenced
+  static const uint8_t blue_cmd[] = {0xA5, 0x06, 0xFF, 0xA0, 0x00, 0x00, 0xFF, 0xA4, 0x5A};
+..\User\Tapelight.c(39): warning:  #177-D: variable "blue_breath_cmd"  was declared but never referenced
+  static const uint8_t blue_breath_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x01, 0x03, 0x01, 0x00, 0xFF, 0xEE, 0x5A};
+..\User\Tapelight.c(43): warning:  #177-D: variable "purple_breath_cmd"  was declared but never referenced
+  static const uint8_t purple_breath_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x01, 0x05, 0x08, 0x00, 0xFF, 0xEE, 0x5A};
+..\User\Tapelight.c(51): warning:  #177-D: variable "blue_flash_cmd"  was declared but never referenced
+  static const uint8_t blue_flash_cmd[] = {0xA5, 0x08, 0xFF, 0xA1, 0x02, 0x03, 0x0A, 0x02, 0xFF, 0xEE, 0x5A};
+..\User\Tapelight.c: 5 warnings, 0 errors
+compiling Bluetooth.c...
+compiling my_uart.c...
+compiling LED.c...
+..\User\LED.c(83): warning:  #550-D: variable "finalPwmValue"  was set but never used
+  	  uint16_t finalPwmValue = 0;
+..\User\LED.c(63): warning:  #177-D: function "RGB_Start"  was declared but never referenced
+  static uint16_t RGB_Start(uint8_t pwmInput)
+..\User\LED.c: 2 warnings, 0 errors
+compiling Control.c...
+..\User\self_check.h(57): warning:  #1-D: last line of file ends without a newline
+  void self_check_control(uint16_t* state);                             // 鑷鎺у埗
+..\User\Control.c(371): warning:  #177-D: variable "Delay0"  was declared but never referenced
+  	static uint16_t Delay0 = 0, Delay1 = 0, Delay2 = 0, Delay5 = 0, Delay4 = 0, Delay3 = 0;
+..\User\Control.c: 2 warnings, 0 errors
+compiling CRC16.c...
+compiling MMU.c...
+compiling my_Encryption.c...
+compiling Light_Sensor.c...
+..\User\Light_Sensor.c(12): warning:  #177-D: variable "Read_Light_Sensor_Data"  was declared but never referenced
+  static const uint8_t Read_Light_Sensor_Data[] = {0x01, 0x03, 0x00, 0x00, 0x00, 0x02, 0xC4, 0x0B};
+..\User\Light_Sensor.c: 1 warning, 0 errors
+compiling my_stm32F10xFlash.c...
+compiling Power.c...
+compiling modbusrtu.c...
+compiling pwm.c...
+..\User\pwm.c(93): warning:  #1-D: last line of file ends without a newline
+  }
+..\User\pwm.c: 1 warning, 0 errors
+compiling Control_Relay.c...
+..\User\Control_Relay.c(213): warning:  #111-D: statement is unreachable
+      Wsc16packet.power_ctrl = PowerControlState;
+..\User\Control_Relay.c: 1 warning, 0 errors
+compiling my_flashData.c...
+../User/self_check.h(57): warning:  #1-D: last line of file ends without a newline
+  void self_check_control(uint16_t* state);                             // 鑷鎺у埗
+..\User\MyFlash\my_flashData.c: 1 warning, 0 errors
+compiling 485_Send.c...
+..\User\485_Send.c(158): warning:  #177-D: variable "lastModel"  was declared but never referenced
+      static uint8_t lastModel = 0xFF;
+..\User\485_Send.c: 1 warning, 0 errors
+compiling self_check.c...
+..\User\self_check.h(57): warning:  #1-D: last line of file ends without a newline
+  void self_check_control(uint16_t* state);                             // 鑷鎺у埗
+..\User\self_check.c(236): warning:  #177-D: variable "Base_Current"  was declared but never referenced
+          static const float Base_Current = 0.45f;   // 鍩虹鐢垫祦
+..\User\self_check.c(237): warning:  #177-D: variable "Base_Power"  was declared but never referenced
+          static const float Base_Power = 51.0f;     // 鍩虹鍔熺巼
+..\User\self_check.c(15): warning:  #177-D: variable "Kw"  was declared but never referenced
+  static uint16_t Kw = 1;											  // 鍔熺巼鍙傛暟
+..\User\self_check.c(16): warning:  #177-D: variable "Base_Current"  was declared but never referenced
+  static float Base_Current = 0.45f;            // 鍩虹鐢垫祦锛堝疄鍦板弬鏁拌幏鍙栵級
+..\User\self_check.c(17): warning:  #177-D: variable "Base_Power"  was declared but never referenced
+  static float Base_Power = 51.0f;              // 鍩虹鍔熺巼锛堝疄鍦板弬鏁拌幏鍙栵級
+..\User\self_check.c(18): warning:  #177-D: variable "A_tolerance"  was declared but never referenced
+  static const float A_tolerance = 0.05f;       // 鐢垫祦瀹瑰樊  卤5%
+..\User\self_check.c(19): warning:  #177-D: variable "W_tolerance"  was declared but never referenced
+  static const float W_tolerance = 0.05f;       // 鍔熺巼瀹瑰樊  卤5%
+..\User\self_check.c: 8 warnings, 0 errors
+compiling HC_433.c...
+linking...
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by gpio.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by freertos.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by dma.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by tim.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by usart.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by stm32f1xx_it.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by stm32f1xx_hal_msp.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by control.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by dht11.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by ds1302.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by led.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by rn7302.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by my_uart.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by bluetooth.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by runtime_manager.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by tapelight.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by 485_send.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by control_relay.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by power.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by hc_433.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by pwm.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by self_check.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by light_sensor.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by modbusrtu.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by my_encryption.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by my_flashdata.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Enable multiply defined (by my_stm32f10xflash.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by gpio.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by freertos.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by dma.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by tim.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by usart.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by stm32f1xx_it.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by stm32f1xx_hal_msp.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by control.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by dht11.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by ds1302.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by led.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by rn7302.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by my_uart.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by bluetooth.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by runtime_manager.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by tapelight.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by 485_send.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by control_relay.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by power.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by hc_433.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by pwm.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by self_check.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by light_sensor.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by modbusrtu.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by my_encryption.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by my_flashdata.o and main.o).
+WSC16\WSC16.axf: Error: L6200E: Symbol CountDown_Seconds multiply defined (by my_stm32f10xflash.o and main.o).
+Not enough information to list image symbols.
+Not enough information to list load addresses in the image map.
+Finished: 2 information, 0 warning and 54 error messages.
+"WSC16\WSC16.axf" - 54 Error(s), 24 Warning(s).
+Target not created.
+Build Time Elapsed:  00:00:15 
+闂杩樺湪锛岃鏄庝綘鏈湴 `main.h` 鐨?`extern` 宸茬粡鏈変簡锛屼絾**鍙︿竴涓ご鏂囦欢**閲屼篃瀹氫箟浜嗚繖涓や釜鍙橀噺锛堢己灏?`extern`锛夈€傝鎴戞煡涓€涓?HAL 閰嶇疆鏂囦欢锛?
+浣犲伐绋嬮噷鏈変袱涓?`main.c`锛乣Core\Src\main.c`锛?772 瀛楄妭锛屽疄闄呯紪璇戠殑锛夊拰 `User\main.c`锛? 瀛楄妭锛夈€傝鎴戠湅瀹為檯缂栬瘧鐨勯偅涓細
+浣犱粨搴撻噷浠ｇ爜鏄纭殑鈥斺€擿Core\Inc\main.h` 鏈?`extern`锛宍Core\Src\main.c` 鏈夊畾涔夈€傞棶棰樺彧鍙兘鍑哄湪浣?*鏈湴**鐨勫姞瀵?`main.h` 涓?`extern` 缂哄け銆?
+
+璇峰湪浣犳湰鍦扮數鑴戜笂锛岀敤鏂囨湰缂栬緫鍣ㄦ墦寮€ `Core\Inc\main.h`锛岀洿鎺ユ悳锛?
+
+```
+CountDown_Seconds
+```
+
+濡傛灉鐪嬪埌鐨勬槸锛?
+```c
+uint16_t CountDown_Seconds;         // 鉂?缂哄皯 extern
+uint8_t  CountDown_Enable;          // 鉂?缂哄皯 extern
+```
+
+鏀规垚锛?
+```c
+extern uint16_t CountDown_Seconds;  // 鉁?鍔犱笂 extern
+extern uint8_t  CountDown_Enable;   // 鉁?鍔犱笂 extern
+```
+
+杩欎袱琛屽簲璇ュ湪鏂囦欢鏈熬 `/* USER CODE BEGIN Private defines */` 涓嬮潰銆傛敼瀹?**Rebuild All** 鍗冲彲銆?

@@ -1,6 +1,8 @@
 # EmbeddedMind
 
 > 从 285 个真实工程会话中提炼的嵌入式开发 AI 知识库。
+> 
+> 两轮炼化：142 知识点 + 155 Patch 案例 + 32 Bug 闭环 + 26 流程模式
 
 ## 数据来源
 
@@ -8,6 +10,7 @@
 - **8,578** 条消息
 - **111,482** 个事件
 - **248** 次代码修改
+- **58,052** 次命令执行
 - **1,482 万 tokens** 投入
 
 ## 覆盖项目
@@ -21,6 +24,7 @@
 
 ## 知识统计
 
+### 一轮：领域知识地图
 | 分类 | 文件数 | 知识点 |
 |------|--------|--------|
 | MCU 开发 | 2 | 13 |
@@ -30,19 +34,39 @@
 | 硬件调试 | 1 | 8 |
 | 项目知识 | 4 | 40+ |
 | 调试模式 | 3 | 27 |
-| **总计** | **19** | **142+** |
+| **小计** | **19** | **~142** |
+
+### 二轮：深度经验库
+| 分类 | 文件数 | 案例数 |
+|------|--------|--------|
+| Patch 案例 | 1 | 155 |
+| Bug 闭环 | 6 目录 | 32 |
+| 工作流程 | 3 | 18 |
+| 推理方法 | 2 | 17 |
+| **小计** | **12** | **222** |
+
+**总知识点: 364+**
+
+## 知识颗粒度
+
+| 层级 | 描述 | 数量 | 示例 |
+|------|------|------|------|
+| L1 原子经验 | 单条踩坑/技巧 | 142+ | "断电再上电需加放电电阻" |
+| L2 模式级 | 调试/设计模式 | 27 | "Modbus无应答五步排查法" |
+| L3 案例级 | 完整Bug/Patch闭环 | 187 | "LT7580启动41秒完整推理链" |
+| L4 方法论 | 工作流/推理框架 | 17 | "硬件异常四步排查顺序" |
+| L5 项目级 | 项目完整知识 | 4 | HelpPort引脚+架构+已知问题 |
 
 ## 使用方式
 
 ### 作为 OpenCode Skill
 
-将 `SKILL.md` 复制到 `~/.config/opencode/skills/embedded-engineer/SKILL.md`：
-
 ```bash
 cp SKILL.md ~/.config/opencode/skills/embedded-engineer/SKILL.md
-cp -r knowledge/ ~/.config/opencode/skills/embedded-engineer/knowledge/
-cp -r patterns/ ~/.config/opencode/skills/embedded-engineer/patterns/
-cp -r projects/ ~/.config/opencode/skills/embedded-engineer/projects/
+cp -r knowledge/ ~/.config/opencode/skills/embedded-engineer/
+cp -r deep_cases/ ~/.config/opencode/skills/embedded-engineer/
+cp -r patterns/ ~/.config/opencode/skills/embedded-engineer/
+cp -r projects/ ~/.config/opencode/skills/embedded-engineer/
 ```
 
 ### 作为 Agent 上下文
@@ -51,20 +75,11 @@ cp -r projects/ ~/.config/opencode/skills/embedded-engineer/projects/
 
 ```markdown
 ## Embedded Development
-- 加载 EmbeddedMind/SKILL.md 获取嵌入式开发知识
-- 遇到 STM32/LVGL/Modbus 问题时查阅 knowledge/ 目录
-- 调试时参考 patterns/debugging-patterns.md
+- 加载 EmbeddedMind/SKILL.md
+- 遇到 Bug 先查 deep_cases/bug_cases/
+- 需要修改先查 deep_cases/patch_cases.md
+- 调试时参考 deep_cases/reasoning/debug-methodology-v2.md
 ```
-
-## 知识格式
-
-每条知识包含：
-- **场景** — 何时遇到
-- **现象** — 观察到的表现
-- **根因** — 深层原因
-- **解决方案** — 具体方法（含代码）
-- **验证** — 如何确认成功
-- **来源** — 原始会话引用
 
 ## 关键经验
 
@@ -84,6 +99,24 @@ cp -r projects/ ~/.config/opencode/skills/embedded-engineer/projects/
 - 关键信号用示波器确认
 - 修改后连续 ≥10 次验证稳定性
 
+## 项目结构
+
+```
+EmbeddedMind/
+├── SKILL.md              ← Agent 加载入口
+├── README.md             ← 本文件
+├── LICENSE               ← MIT
+├── SPEC.md               ← 炼丹规格
+├── knowledge/            ← 一轮：领域知识 (12文件)
+├── patterns/             ← 一轮：模式库 (3文件)
+├── projects/             ← 一轮：项目知识 (4文件)
+└── deep_cases/           ← 二轮：深度经验库
+    ├── patch_cases.md    ← 155个代码修改案例
+    ├── bug_cases/        ← 32个Bug闭环 (6目录)
+    ├── workflows/        ← 18个标准流程
+    └── reasoning/        ← 17个推理方法+架构
+```
+
 ## License
 
-内部工程经验总结，仅限团队使用。
+MIT
